@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+YDATE=$(date -d "yesterday" +"%Y-%m-%d")
+FILE="$HOME/notes/notes.txt"
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet."
+  exit 1
+fi
+
+DATE="$YDATE"
+export DATE
+
+# reuse your review script by temporarily faking DATE
+# (review uses date +"%Y-%m-%d" internally, so we inline a minimal copy here)
+
+echo "===== REVIEW: $DATE ====="
+
+TODAY_BLOCK=$(
+  awk -v d="$DATE" '
+    $0 ~ "^===== "d" =====" {inblock=1; print; next}
+    $0 ~ "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" && inblock==1 {exit}
+    inblock==1 {print}
+  ' "$FILE"
+)
+
+if [ -z "$TODAY_BLOCK" ]; then
+  TODAY_BLOCK=$(rg -n "^\[$DATE" "$FILE" 2>/dev/null || true)
+fi
+
+if [ -z "$TODAY_BLOCK" ]; then
+  echo "no entries for yesterday."
+  exit 0
+fi
+
+echo
+echo "---- entries ----"
+echo "$TODAY_BLOCK"
+
+COUNT=$(echo "$TODAY_BLOCK" | rg -c "^\[$DATE( [0-9]{2}:[0-9]{2})?\]" 2>/dev/null || true)
+
+echo
+echo "---- stats ----"
+echo "entry lines: ${COUNT:-0}"
+
+echo
+echo "---- top tags ----"
+echo "$TODAY_BLOCK" \
+  | rg -o "#[A-Za-z0-9_/-]+" 2>/dev/null \
+  | sort | uniq -c | sort -nr | head -n 10
+
+echo
+echo "---- last 10 lines (quick scan) ----"
+echo "$TODAY_BLOCK" | tail -n 10

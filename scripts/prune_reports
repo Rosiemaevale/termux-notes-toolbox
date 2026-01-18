@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+DIR="$HOME/notes/reports"
+KEEP=12
+
+[ -d "$DIR" ] || exit 0
+
+# delete older than newest $KEEP
+ls -1t "$DIR"/week-*.txt 2>/dev/null | tail -n +$((KEEP+1)) | xargs -r rm -f
+echo "kept newest $KEEP reports"

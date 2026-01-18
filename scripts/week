@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet."
+  exit 1
+fi
+
+echo "===== WEEK REVIEW (last 7 days) ====="
+echo
+
+# Prefer separator-based parsing if present
+if rg -q "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" "$FILE" 2>/dev/null; then
+  # get last 7 day headers from the file
+  DAYS=$(rg "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" "$FILE" \
+    | tail -n 7 \
+    | sed -E 's/^===== ([0-9]{4}-[0-9]{2}-[0-9]{2}) =====$/\1/')
+
+  TOTAL=0
+
+  for d in $DAYS; do
+    echo "----- $d -----"
+    BLOCK=$(awk -v dd="$d" '
+      $0 ~ "^===== "dd" =====" {inblock=1; next}
+      $0 ~ "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" && inblock==1 {exit}
+      inblock==1 {print}
+    ' "$FILE")
+
+    if [ -z "$BLOCK" ]; then
+      echo "(no entries)"
+      echo
+      continue
+    fi
+
+    COUNT=$(echo "$BLOCK" | rg -c "^\[$d( [0-9]{2}:[0-9]{2})?\]" 2>/dev/null || echo 0)
+    TOTAL=$((TOTAL + COUNT))
+    echo "entries: $COUNT"
+
+    echo "top tags:"
+    echo "$BLOCK" | rg -o "#[A-Za-z0-9_/-]+" 2>/dev/null | sort | uniq -c | sort -nr | head -n 5
+    echo
+  done
+
+  echo "TOTAL entry lines (7 days): $TOTAL"
+  exit 0
+fi
+
+# Fallback: timestamp-line based (no day separators)
+echo "(no day separators detected, using timestamp lines)"
+echo
+
+for i in 0 1 2 3 4 5 6; do
+  d=$(date -d "$i day ago" +"%Y-%m-%d")
+  echo "----- $d -----"
+  COUNT=$(rg -c "^\[$d" "$FILE" 2>/dev/null || echo 0)
+  echo "entries: $COUNT"
+  rg "^\[$d" "$FILE" 2>/dev/null | rg -o "#[A-Za-z0-9_/-]+" | sort | uniq -c | sort -nr | head -n 5
+  echo
+done

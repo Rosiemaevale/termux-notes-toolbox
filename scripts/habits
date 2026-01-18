@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet."
+  exit 1
+fi
+
+# Collect all dates that have entries
+DATES=$(rg -o "^\[[0-9]{4}-[0-9]{2}-[0-9]{2}" "$FILE" \
+  | sed 's/^\[//' \
+  | sort -u)
+
+if [ -z "$DATES" ]; then
+  echo "no dated entries found."
+  exit 0
+fi
+
+echo "===== HABIT SIGNALS ====="
+echo
+
+# Convert dates to epoch days
+epoch_day() {
+  date -d "$1" +"%s"
+}
+
+# Current streak
+TODAY=$(date +"%Y-%m-%d")
+CUR_STREAK=0
+d="$TODAY"
+
+while echo "$DATES" | rg -q "^$d$"; do
+  CUR_STREAK=$((CUR_STREAK + 1))
+  d=$(date -d "$d -1 day" +"%Y-%m-%d")
+done
+
+echo "current streak: $CUR_STREAK day(s)"
+
+# Longest streak
+LONGEST=0
+STREAK=0
+PREV=""
+
+for d in $DATES; do
+  if [ -z "$PREV" ]; then
+    STREAK=1
+  else
+    diff=$(( ( $(epoch_day "$d") - $(epoch_day "$PREV") ) / 86400 ))
+    if [ "$diff" -eq 1 ]; then
+      STREAK=$((STREAK + 1))
+    else
+      STREAK=1
+    fi
+  fi
+  [ "$STREAK" -gt "$LONGEST" ] && LONGEST="$STREAK"
+  PREV="$d"
+done
+
+echo "longest streak: $LONGEST day(s)"
+echo
+
+# Gaps (missed days between first and last entry)
+FIRST=$(echo "$DATES" | head -n 1)
+LAST=$(echo "$DATES" | tail -n 1)
+
+echo "gaps:"
+d="$FIRST"
+GAPS=0
+
+while [ "$d" != "$LAST" ]; do
+  if ! echo "$DATES" | rg -q "^$d$"; then
+    echo "  missing: $d"
+    GAPS=$((GAPS + 1))
+  fi
+  d=$(date -d "$d +1 day" +"%Y-%m-%d")
+done
+
+[ "$GAPS" -eq 0 ] && echo "  none"
+echo
+
+# Tag consistency (days tag appeared)
+echo "tag consistency (days present):"
+for tag in $(rg -o "#[A-Za-z0-9_/-]+" "$FILE" | sort -u); do
+  DAYS=$(rg "$tag" "$FILE" | rg -o "^\[[0-9]{4}-[0-9]{2}-[0-9]{2}" | sed 's/^\[//' | sort -u | wc -l)
+  printf "%-12s %s\n" "$tag" "$DAYS"
+done

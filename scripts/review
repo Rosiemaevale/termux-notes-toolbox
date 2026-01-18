@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+DATE=$(date +"%Y-%m-%d")
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet. use: note ..."
+  exit 1
+fi
+
+echo "===== REVIEW: $DATE ====="
+
+# Extract today's block.
+# 1) If day separators exist: grab from today's separator to the next separator.
+# 2) Otherwise: fall back to lines starting with [YYYY-MM-DD
+TODAY_BLOCK=$(
+  awk -v d="$DATE" '
+    $0 ~ "^===== "d" =====" {inblock=1; print; next}
+    $0 ~ "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" && inblock==1 {exit}
+    inblock==1 {print}
+  ' "$FILE"
+)
+
+if [ -z "$TODAY_BLOCK" ]; then
+  TODAY_BLOCK=$(rg -n "^\[$DATE" "$FILE" || true)
+fi
+
+if [ -z "$TODAY_BLOCK" ]; then
+  echo "no entries for today."
+  exit 0
+fi
+
+echo
+echo "---- entries ----"
+echo "$TODAY_BLOCK"
+
+# Count entries by timestamp lines like [YYYY-MM-DD HH:MM]
+COUNT=$(echo "$TODAY_BLOCK" | rg -c "^\[$DATE( [0-9]{2}:[0-9]{2})?\]" || true)
+
+echo
+echo "---- stats ----"
+echo "entry lines: ${COUNT:-0}"
+
+echo
+echo "---- top tags ----"
+echo "$TODAY_BLOCK" \
+  | rg -o "#[A-Za-z0-9_/-]+" \
+  | sort \
+  | uniq -c \
+  | sort -nr \
+  | head -n 10
+
+echo
+echo "---- last 10 lines (quick scan) ----"
+echo "$TODAY_BLOCK" | tail -n 10

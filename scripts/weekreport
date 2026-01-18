@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet."
+  exit 1
+fi
+
+echo "===== WEEKLY REPORT (last 7 days) ====="
+echo
+
+TOTAL_ENTRIES=0
+ACTIVE_DAYS=0
+GAPS=0
+
+# Collect per-day stats
+for i in $(seq 6 -1 0); do
+  d=$(date -d "$i day ago" +"%Y-%m-%d")
+  COUNT=$(rg -c "^\[$d( [0-9]{2}:[0-9]{2})?\]" "$FILE" 2>/dev/null || echo 0)
+
+  if [ "$COUNT" -gt 0 ]; then
+    ACTIVE_DAYS=$((ACTIVE_DAYS + 1))
+  else
+    GAPS=$((GAPS + 1))
+  fi
+
+  TOTAL_ENTRIES=$((TOTAL_ENTRIES + COUNT))
+  printf "%s  entries: %s\n" "$d" "$COUNT"
+done
+
+echo
+echo "---- totals ----"
+echo "active days: $ACTIVE_DAYS / 7"
+echo "gaps: $GAPS"
+echo "total entries: $TOTAL_ENTRIES"
+echo
+
+# Top tags for the week
+echo "---- top tags (week) ----"
+rg "^\[" "$FILE" 2>/dev/null \
+  | rg -o "#[A-Za-z0-9_/-]+" \
+  | sort | uniq -c | sort -nr | head -n 10
+
+echo
+echo "---- intensity ----"
+# rough intensity proxy: days with >= median+3 entries
+MED=$(for i in $(seq 6 -1 0); do
+  d=$(date -d "$i day ago" +"%Y-%m-%d")
+  rg -c "^\[$d( [0-9]{2}:[0-9]{2})?\]" "$FILE" 2>/dev/null || echo 0
+done | sort -n | sed -n '4p')
+
+[ -z "$MED" ] && MED=0
+
+for i in $(seq 6 -1 0); do
+  d=$(date -d "$i day ago" +"%Y-%m-%d")
+  c=$(rg -c "^\[$d( [0-9]{2}:[0-9]{2})?\]" "$FILE" 2>/dev/null || echo 0)
+  if [ "$c" -ge $((MED + 3)) ]; then
+    echo "$d  high activity ($c)"
+  fi
+done
+
+echo
+echo "---- takeaway ----"
+if [ "$ACTIVE_DAYS" -ge 5 ]; then
+  echo "consistent week. continuity is working."
+elif [ "$ACTIVE_DAYS" -ge 3 ]; then
+  echo "partial continuity. reduce friction at the start of the day."
+else
+  echo "low continuity. switch to low mode, one line per day is enough."
+fi

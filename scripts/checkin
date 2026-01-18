@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+prompt
+echo
+echo "writing mode. type your response, ctrl+d to save."
+note
+echo
+echo "quick summary:"
+summarize

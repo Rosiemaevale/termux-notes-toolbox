@@ -1,0 +1,10 @@
+# private data
+notes.txt
+notes/
+storage/
+*.tar.gz
+
+# termux / shell noise
+.cache/
+.crontab
+.bash_history

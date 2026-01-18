@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+REPORT_DIR="$HOME/notes/reports"
+STAMP=$(date +"%Y-%m-%d")
+OUT="$REPORT_DIR/week-$STAMP.txt"
+
+mkdir -p "$REPORT_DIR"
+
+# Write report
+{
+  echo "generated: $(date +"%Y-%m-%d %H:%M")"
+  echo
+  weekreport
+} > "$OUT"
+
+echo "saved: $OUT"

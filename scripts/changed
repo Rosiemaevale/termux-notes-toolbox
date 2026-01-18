@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+ROOT="$HOME/storage/shared"
+
+if [ ! -d "$ROOT" ]; then
+  echo "shared storage not enabled. run: termux-setup-storage"
+  exit 1
+fi
+
+find "$ROOT" -type f -mtime -1 -print 2>/dev/null | head -n 200

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+
+if [ ! -f "$FILE" ]; then
+  echo "no notes yet. use: note something"
+  exit 1
+fi
+
+if [ -z "$1" ]; then
+  echo "usage: notes search terms"
+  exit 1
+fi
+
+rg -n --smart-case -C 1 "$*" "$FILE"

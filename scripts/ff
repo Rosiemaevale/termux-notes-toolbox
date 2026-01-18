@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+ROOT="$HOME/storage/shared"
+QUERY="$*"
+
+if [ -z "$QUERY" ]; then
+  echo "usage: ff filename-part"
+  exit 1
+fi
+
+if [ ! -d "$ROOT" ]; then
+  echo "shared storage not enabled. run: termux-setup-storage"
+  exit 1
+fi
+
+find "$ROOT" -iname "*$QUERY*" 2>/dev/null | head -n 50

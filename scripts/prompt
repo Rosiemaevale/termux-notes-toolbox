@@ -1,0 +1,245 @@
+
+#!/usr/bin/env bash
+FILE="$HOME/notes/notes.txt"
+TODAY=$(date +"%Y-%m-%d")
+YDAY=$(date -d "yesterday" +"%Y-%m-%d")
+
+if [ ! -f "$FILE" ]; then
+  echo "===== calibrated prompt: $TODAY ====="
+  echo
+  echo "start simple."
+  echo "1) what do you want today to feel like?"
+  echo "2) what is one concrete thing you can do in 5 minutes?"
+  exit 0
+fi
+
+has_date() { rg -q "^\[$1" "$FILE" 2>/dev/null; }
+
+days_since_any_entry() {
+  last=$(rg -o "^\[[0-9]{4}-[0-9]{2}-[0-9]{2}" "$FILE" 2>/dev/null | tail -n 1 | sed 's/^\[//')
+  if [ -z "$last" ]; then echo 999; return; fi
+  echo $(( ( $(date -d "$TODAY" +%s) - $(date -d "$last" +%s) ) / 86400 ))
+}
+
+days_since_tag() {
+  tag="$1"
+  last=$(rg "$tag" "$FILE" 2>/dev/null | tail -n 1 | rg -o "^\[[0-9]{4}-[0-9]{2}-[0-9]{2}" | sed 's/^\[//')
+  if [ -z "$last" ]; then echo 999; return; fi
+  echo $(( ( $(date -d "$TODAY" +%s) - $(date -d "$last" +%s) ) / 86400 ))
+}
+
+median_from_numbers() {
+  # reads numbers from stdin, prints median (int)
+  nums=$(cat | tr ' ' '\n' | rg -o "^[0-9]+$" | sort -n)
+  if [ -z "$nums" ]; then echo 0; return; fi
+  n=$(echo "$nums" | wc -l)
+  mid=$(( (n + 1) / 2 ))
+  echo "$nums" | sed -n "${mid}p"
+}
+
+max_int() { [ "$1" -ge "$2" ] && echo "$1" || echo "$2"; }
+
+# ---- Learn baselines from last 14 days ----
+ENTRY_COUNTS=""
+PRESS_COUNTS=""
+HOUR_COUNTS=""
+
+for i in $(seq 0 13); do
+  d=$(date -d "$i day ago" +"%Y-%m-%d")
+  c=$(rg -c "^\[$d( [0-9]{2}:[0-9]{2})?\]" "$FILE" 2>/dev/null || echo 0)
+
+  # Hours active that day
+  h=$(rg -o "^\[$d ([0-9]{2}):[0-9]{2}\]" "$FILE" 2>/dev/null \
+    | sed -E 's/^\[[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}).*/\1/' \
+    | sort -u | wc -l)
+  [ -z "$h" ] && h=0
+
+  # Pressure words that day (same list you had)
+  p=$(rg "^\[$d" "$FILE" 2>/dev/null \
+    | tr '[:upper:]' '[:lower:]' \
+    | rg -o "\b(fuck|hate|panic|anxious|afraid|stuck|spiral|overwhelmed|urgent|cant|can't|need|should|must)\b" 2>/dev/null \
+    | wc -l)
+  [ -z "$p" ] && p=0
+
+  ENTRY_COUNTS="$ENTRY_COUNTS $c"
+  HOUR_COUNTS="$HOUR_COUNTS $h"
+  PRESS_COUNTS="$PRESS_COUNTS $p"
+done
+
+MED_ENTRIES=$(echo "$ENTRY_COUNTS" | median_from_numbers)
+MED_HOURS=$(echo "$HOUR_COUNTS" | median_from_numbers)
+MED_PRESS=$(echo "$PRESS_COUNTS" | median_from_numbers)
+
+# Dynamic thresholds
+OVERLOAD_THR=$(max_int 8 $((MED_ENTRIES * 2)))
+# Cluster = lots of entries in unusually few hours
+CLUSTER_ENTRIES_THR=$(max_int 6 $((MED_ENTRIES + 3)))
+CLUSTER_HOURS_THR=$(max_int 1 $((MED_HOURS > 0 ? MED_HOURS - 1 : 1)))
+PRESS_THR=$(max_int 6 $((MED_PRESS + 4)))
+
+# ---- Today block (for more detailed signals) ----
+TODAY_BLOCK=$(
+  awk -v d="$TODAY" '
+    $0 ~ "^===== "d" =====" {inblock=1; next}
+    $0 ~ "^===== [0-9]{4}-[0-9]{2}-[0-9]{2} =====" && inblock==1 {exit}
+    inblock==1 {print}
+  ' "$FILE"
+)
+if [ -z "$TODAY_BLOCK" ]; then
+  TODAY_BLOCK=$(rg "^\[$TODAY" "$FILE" 2>/dev/null || true)
+fi
+
+ENTRY_COUNT=0
+HOURS=0
+PRESSURE=0
+
+if [ -n "$TODAY_BLOCK" ]; then
+  ENTRY_COUNT=$(echo "$TODAY_BLOCK" | rg -c "^\[$TODAY( [0-9]{2}:[0-9]{2})?\]" 2>/dev/null || echo 0)
+  HOURS=$(echo "$TODAY_BLOCK" \
+    | rg -o "\[$TODAY ([0-9]{2}):[0-9]{2}\]" 2>/dev/null \
+    | sed -E 's/.* ([0-9]{2}).*/\1/' \
+    | sort -u | wc -l)
+  PRESSURE=$(echo "$TODAY_BLOCK" \
+    | tr '[:upper:]' '[:lower:]' \
+    | rg -o "\b(fuck|hate|panic|anxious|afraid|stuck|spiral|overwhelmed|urgent|cant|can't|need|should|must)\b" 2>/dev/null \
+    | wc -l)
+fi
+
+HAS_TODAY=0; has_date "$TODAY" && HAS_TODAY=1
+MISSED_YDAY=0; has_date "$YDAY" || MISSED_YDAY=1
+GAP=$(days_since_any_entry)
+
+# Tag recency (edit these to match your real tags)
+DS_TODO=$(days_since_tag "#todo")
+DS_MOOD=$(days_since_tag "#mood")
+DS_IDEA=$(days_since_tag "#idea")
+
+AGITATED=0
+if [ "$ENTRY_COUNT" -ge "$CLUSTER_ENTRIES_THR" ] && [ "$HOURS" -le "$CLUSTER_HOURS_THR" ]; then AGITATED=1; fi
+if [ "$PRESSURE" -ge "$PRESS_THR" ]; then AGITATED=1; fi
+
+echo "===== learned prompt: $TODAY ====="
+echo
+echo "baseline (14d median): entries=$MED_ENTRIES, hours=$MED_HOURS, pressure=$MED_PRESS"
+echo "thresholds: overload>=$OVERLOAD_THR, cluster entries>=$CLUSTER_ENTRIES_THR in <=$CLUSTER_HOURS_THR hour(s), pressure>=$PRESS_THR"
+
+# ---- Mode selection ----
+# Heuristics:
+# - low: below baseline, or gap/recovery, or very low activity
+# - high: above baseline and/or agitation signals
+# - normal: default
+MODE="normal"
+
+if [ "$GAP" -ge 3 ]; then
+  MODE="low"
+fi
+
+if [ "$ENTRY_COUNT" -le 1 ] && [ "$HAS_TODAY" -eq 0 ]; then
+  MODE="low"
+fi
+
+if [ "$ENTRY_COUNT" -ge "$OVERLOAD_THR" ] || [ "$AGITATED" -eq 1 ]; then
+  MODE="high"
+fi
+
+# If you wrote a little but not much, keep normal
+if [ "$MODE" = "low" ] && [ "$ENTRY_COUNT" -ge 2 ] && [ "$GAP" -eq 0 ]; then
+  MODE="normal"
+fi
+
+echo
+echo "mode: $MODE"
+echo
+
+echo
+
+# Recovery mode
+if [ "$GAP" -ge 3 ]; then
+  echo "recovery mode (gap: $GAP days). restart counts even if it’s ugly."
+  echo "1) what blocked you, friction, fear, fatigue, or chaos?"
+  echo "2) smallest restart: name 1 action under 5 minutes."
+  echo "3) one constraint for today (screens, substances, people, spending)."
+  echo
+else
+  if [ "$HAS_TODAY" -eq 0 ] && [ "$MISSED_YDAY" -eq 1 ]; then
+    echo "you went quiet yesterday. no punishment."
+    echo "1) what derailed you, time, energy, fear, or chaos?"
+    echo "2) what is the smallest restart that counts (2 minutes)?"
+    echo
+  fi
+
+  if [ "$HAS_TODAY" -eq 0 ] && [ "$MISSED_YDAY" -eq 0 ]; then
+    echo "yesterday happened, today is open."
+    echo "1) what is the main objective truth today (one sentence)?"
+    echo "2) what is one constraint to protect it (money, time, people, substances, screens)?"
+    echo
+  fi
+fi
+
+# Underload / overload
+if [ "$ENTRY_COUNT" -eq 0 ]; then
+  echo "underload: nothing logged yet."
+  echo "write 1 line: what matters most in the next 3 hours?"
+  echo
+elif [ "$ENTRY_COUNT" -ge "$OVERLOAD_THR" ]; then
+  echo "overload: lots of logging ($ENTRY_COUNT entries). compress it."
+  echo "1) what is the single decision you’re avoiding?"
+  echo "2) pick one action that ends a loop."
+  echo
+fi
+
+# Agitation branch
+if [ "$AGITATED" -eq 1 ]; then
+  echo "agitation detected (relative to your baseline). body-first."
+  echo "1) unclench one place for 30 seconds."
+  echo "2) name the loop in 6 words max."
+  echo "3) one physical action now (water, shower, walk, stretch)."
+  echo
+fi
+
+# Tag nudges
+if [ "$DS_TODO" -ge 3 ]; then
+  echo "todo has been quiet ($DS_TODO days)."
+  echo "write 1 #todo you can complete in 10 minutes."
+  echo
+fi
+
+if [ "$DS_MOOD" -ge 2 ]; then
+  echo "mood check has been quiet ($DS_MOOD days)."
+  echo "write 1 #mood line: body state + emotion (no story)."
+  echo
+fi
+
+if [ "$DS_IDEA" -ge 5 ]; then
+  echo "ideas have been quiet ($DS_IDEA days)."
+  echo "write 1 #idea that would make your life easier."
+  echo
+fi
+
+
+# ---- Mode-specific close ----
+if [ "$MODE" = "low" ]; then
+  echo "low mode:"
+  echo "1) pick one tiny action that improves your body state (water, food, shower, light)."
+  echo "2) pick one tiny action that reduces chaos (one item, one surface, one file)."
+  echo "3) write 1 #todo that is embarrassingly small."
+  echo
+  echo "always:"
+  echo "next physical action (10 seconds). then stop."
+elif [ "$MODE" = "high" ]; then
+  echo "high mode:"
+  echo "1) what is the one decision you’re trying to out-write?"
+  echo "2) what boundary shuts down the loop (screens, people, spending, stimulants)?"
+  echo "3) choose one action that produces a finished artifact."
+  echo
+  echo "always:"
+  echo "next physical action, then a 15-minute timer."
+else
+  echo "normal mode:"
+  echo "1) one objective for the next 3 hours."
+  echo "2) one constraint that protects it."
+  echo "3) one #todo you can finish today."
+  echo
+  echo "always:"
+  echo "next physical action, and the sabotage counter."
+fi
