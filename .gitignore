@@ -4,6 +4,10 @@ notes/
 storage/
 *.tar.gz
 
+# credentials and shell history
+.git-credentials
+.bash_history
+
 # termux / shell noise
 .cache/
 .crontab
